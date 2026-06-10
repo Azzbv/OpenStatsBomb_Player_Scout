@@ -1,26 +1,18 @@
-# ⚽ ScoutDash: Advanced Recruitment Analytics
+# ScoutDash: Advanced Recruitment Analytics
 
 A professional player recruitment dashboard built with **Python**, **Streamlit**, and **StatsBomb Open Data**. ScoutDash transforms raw event-level data into tactical fit rankings and spatial activity profiles to support data-driven scouting decisions.
 
-## 🎯 Value Proposition
+## Value Proposition
 ScoutDash moves beyond generic box-score statistics. It leverages StatsBomb coordinates to calculate advanced KPIs like **Progressive Passes**, **Penalty Area Involvement**, and **Spatial Dominance**, allowing technical directors to rank players based on specific tactical systems.
 
-## 🚀 Core Functionalities
+## Core Functionalities
 - **Live Data Ingestion**: Direct integration with `statsbombpy` for real-time access to competitions (La Liga, World Cup, FA WSL, etc.).
 - **Tactical Fit Scoring**: A transparent, weighted engine (0-100) that ranks players against pre-defined role templates (e.g., *Ball-Playing Centre Back*, *Pressing Forward*).
 - **Spatial Profiling**: 3-Third Heatmaps (Defensive, Middle, Final) showing where players provide the most value in possession and defense.
 - **Explainable Analytics**: Every ranking includes a contribution breakdown and rule-based scouting notes to ensure high interpretability.
 - **Comparison Engine**: Side-by-side radar charts and category leadership tracking for up to 5 players.
 
-## 📈 Methodology & Technical Integrity
-1. **Per-90 Normalization**: All volume metrics (shots, tackles, etc.) are normalized by minutes played to ensure fair comparison between squad players and starters.
-2. **Min-Max Scaling**: Metrics are scaled relative to the selected league/season cohort for percentile-style ranking.
-3. **Event-Derived KPIs**: 
-   - **Progressive Pass Proxy**: Completed passes ending at least 12m closer to the goal line.
-   - **Chance Creation zones**: Categorized by sector using event coordinates.
-   - **Turnover tracking**: Aggregated from miscontrols and dispossessions.
-
-## 📂 Project Architecture
+## Project Architecture
 ```text
 ├── app.py                # Dashboard UI & User Flow
 ├── src/
@@ -57,6 +49,3 @@ ScoutDash moves beyond generic box-score statistics. It leverages StatsBomb coor
 - **Sample Size**: Currently aggregates a subset of matches (default: 10) for performance. Future work will optimize for full-season aggregation.
 - **Physical Data**: Does not currently include GPS/Tracking data (not available in Open Data).
 - **Planned**: Integration of Expected Threat (xT) and Pass Clustering.
-
----
-*Created for professional football analytics portfolios. Data provided by StatsBomb.*
