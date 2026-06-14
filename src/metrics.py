@@ -6,8 +6,9 @@ def calculate_scouting_metrics(df):
     safe_mins = df["minutes"].replace(0, 1)
     
     p90_cols = [
-        "goals", "np_goals", "shots", "shots_on_target", "xg", "np_xg", 
-        "assists", "key_passes", "passes", "passes_completed", 
+        "goals", "np_goals", "shots", "shots_on_target",
+        "np_shots", "np_shots_on_target", "xg", "np_xg",
+        "assists", "key_passes", "passes", "passes_completed",
         "passes_f3", "passes_pa", "prog_passes",
         "carries", "prog_carries", "dribbles", "turnovers",
         "pressures", "tackles", "interceptions", "recoveries", "blocks"
@@ -19,7 +20,11 @@ def calculate_scouting_metrics(df):
             
     if "passes" in df.columns and "passes_completed" in df.columns:
         df["pass_completion_pct"] = (df["passes_completed"] / df["passes"].replace(0, 1)) * 100
-        
+
+    # Shot quality from non-penalty shots so a penalty (xG ~0.79) can't distort it.
+    if "np_xg" in df.columns and "np_shots" in df.columns:
+        df["xg_per_shot"] = df["np_xg"] / df["np_shots"].replace(0, 1)
+
     return df
 
 def get_metric_categories():

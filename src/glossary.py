@@ -1,7 +1,6 @@
 def get_metric_glossary():
     """Return dictionary of metric definitions for user education."""
     return {
-        # ATTACKING
         "goals": {
             "display": "Goals",
             "category": "Attacking",
@@ -34,6 +33,22 @@ def get_metric_glossary():
             "method": "Shots with outcome 'Goal', 'Saved', or 'Saved to Post'.",
             "note": "Exact measure."
         },
+        "np_shots": {
+            "display": "Non-Penalty Shots",
+            "category": "Attacking",
+            "definition": "Shot attempts excluding penalty kicks.",
+            "rationale": "Open-play/set-piece shot volume without penalty inflation.",
+            "method": "Count of 'Shot' events where shot_type is not 'Penalty'.",
+            "note": "Exact measure."
+        },
+        "np_shots_on_target": {
+            "display": "Non-Penalty Shots on Target",
+            "category": "Attacking",
+            "definition": "On-target shots excluding penalty kicks.",
+            "rationale": "Accuracy/threat volume independent of penalties.",
+            "method": "Non-penalty shots with outcome 'Goal', 'Saved', or 'Saved to Post'.",
+            "note": "Exact measure."
+        },
         "xg": {
             "display": "Expected Goals (xG)",
             "category": "Attacking",
@@ -55,10 +70,9 @@ def get_metric_glossary():
             "category": "Attacking",
             "definition": "Average quality of shots taken.",
             "rationale": "High value indicates elite shot selection (shooting from better positions).",
-            "method": "Total xG / Total Shots.",
+            "method": "Non-penalty xG / Non-penalty shots.",
             "note": "Exact measure."
         },
-        # PROGRESSION
         "passes_f3": {
             "display": "Passes into Final Third",
             "category": "Progression",
@@ -91,7 +105,6 @@ def get_metric_glossary():
             "method": "Carry end location > 10m closer to goal line than start.",
             "note": "Positional proxy."
         },
-        # CREATIVITY
         "key_passes": {
             "display": "Key Passes",
             "category": "Creativity",
@@ -116,7 +129,6 @@ def get_metric_glossary():
             "method": "Count of 'Dribble' events with outcome 'Complete'.",
             "note": "Exact measure."
         },
-        # POSSESSION
         "passes": {
             "display": "Passes Attempted",
             "category": "Possession",
@@ -149,7 +161,6 @@ def get_metric_glossary():
             "method": "Sum of 'Miscontrol' and 'Dispossessed' events.",
             "note": "Exact measure."
         },
-        # DEFENDING
         "pressures": {
             "display": "Pressures",
             "category": "Defending",
@@ -190,7 +201,6 @@ def get_metric_glossary():
             "method": "Count of 'Block' events.",
             "note": "Exact measure."
         },
-        # GENERAL
         "scout_score": {
             "display": "Fit Score",
             "category": "Scoring",

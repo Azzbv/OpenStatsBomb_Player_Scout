@@ -37,17 +37,12 @@ def filter_by_minutes(df, min_minutes=450, minutes_col="minutes"):
 def filter_by_matches(df, min_matches=3, matches_col="matches"):
     return df[df[matches_col] >= min_matches].copy()
 
-def filter_players(df, position=None, role_group=None, age_range=None):
+def filter_players(df, role_group=None):
+    # position / age_range filtering removed: position was unused and age is not
+    # available in StatsBomb Open Data.
     filtered_df = df.copy()
-    if position:
-        filtered_df = filtered_df[filtered_df["pos"] == position]
     if role_group:
         filtered_df = filtered_df[filtered_df["role_group"] == role_group]
-    if age_range:
-        filtered_df = filtered_df[
-            (filtered_df["age"] >= age_range[0]) & 
-            (filtered_df["age"] <= age_range[1])
-        ]
     return filtered_df
 
 def normalize_metrics(df, metrics):

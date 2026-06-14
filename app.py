@@ -8,19 +8,21 @@ from src.visuals import plot_radar_chart, plot_scatter_comparison, plot_spatial_
 from src.insights import get_top_traits, generate_recruitment_report, generate_tldr_summary
 from src.comparison import get_best_in_categories, generate_scouting_note
 from src.glossary import get_metric_glossary
+from src.style import apply_custom_style, safe
 
 st.set_page_config(page_title="ScoutDash | StatsBomb", layout="wide")
 
 def main():
-    st.title("⚽ Player Recruitment Dashboard (StatsBomb Open Data)")
+    apply_custom_style()
+    st.title("Player Recruitment Dashboard (StatsBomb Open Data)")
     
     st.sidebar.header("Data Source")
     comps_df = get_competitions()
     
-    global_scope = st.sidebar.checkbox("🌍 Enable Global Scope", help="Aggregate data across multiple leagues in the same year/gender.")
+    global_scope = st.sidebar.checkbox("Enable Global Scope", help="Aggregate data across multiple leagues in the same year/gender.")
     
     sample_limit = st.sidebar.slider("Match Sample Limit", 1, 38, 5, help="Number of matches to scan per league.")
-    st.sidebar.warning("⚠️ Data is sampled for performance.")
+    st.sidebar.warning("Data is sampled for performance.")
     
     if global_scope:
         genders = sorted(list(comps_df["competition_gender"].unique()))
@@ -47,8 +49,14 @@ def main():
                 st.write(f"- {league}")
         
         with st.spinner("Processing Global StatsBomb data..."):
-            raw_df, all_player_events = load_multiple_competitions(comp_pairs, max_matches_per_comp=sample_limit)
-        
+            try:
+                raw_df, all_player_events = load_multiple_competitions(comp_pairs, max_matches_per_comp=sample_limit)
+            except Exception:
+                st.error("Could not load StatsBomb data for this selection. "
+                         "The open-data source may be unavailable or this "
+                         "competition may have no event data. Try another league/season.")
+                return
+
         ref_comp_id = matching_comps.iloc[0]["competition_id"]
         sel_comp = "Global Scope"
         sel_season = sel_year
@@ -64,8 +72,18 @@ def main():
         ref_comp_id = comp_row["competition_id"]
         
         with st.spinner("Processing StatsBomb events..."):
-            raw_df, all_player_events = load_statsbomb_player_data(comp_row["competition_id"], comp_row["season_id"], max_matches=sample_limit)
-        
+            try:
+                raw_df, all_player_events = load_statsbomb_player_data(comp_row["competition_id"], comp_row["season_id"], max_matches=sample_limit)
+            except Exception:
+                st.error("Could not load StatsBomb data for this selection. "
+                         "The open-data source may be unavailable or this "
+                         "competition may have no event data. Try another league/season.")
+                return
+
+    if raw_df.empty:
+        st.warning("No player data found for this selection.")
+        return
+
     df = clean_player_data(raw_df)
     df = map_positions_to_roles(df)
     df = calculate_scouting_metrics(df)
@@ -113,7 +131,7 @@ def main():
                     all_metrics.extend(selected)
 
     st.sidebar.markdown("---")
-    with st.sidebar.expander("📖 Metric Glossary"):
+    with st.sidebar.expander("Metric Glossary"):
         glossary = get_metric_glossary()
         for k, info in glossary.items():
             if k in ["xg", "key_passes", "prog_passes", "pressures", "turnovers", "scout_score"]:
@@ -133,14 +151,14 @@ def main():
     scored_df = calculate_recruitment_score(df_norm, weights)
     scored_df = scored_df.sort_values("scout_score", ascending=False)
 
-    tabs = st.tabs(["📊 Ranking", "⚖️ Comparison", "👤 Player Profile", "📖 Metric Guide"])
+    tabs = st.tabs(["RANKING", "COMPARISON", "PLAYER PROFILE", "METRIC GUIDE"])
 
     with tabs[0]:
         st.subheader(f"Top Targets: {sel_comp} ({sel_season})", help="Ranked by Fit Score.")
         display_cols = ["player", "team", "pos", "role_group", "minutes", "matches", "scout_score"]
         st.dataframe(
             scored_df[display_cols].head(25).style.format({"scout_score": "{:.1f}"})
-                                              .background_gradient(subset=["scout_score"], cmap="YlGn"),
+                                              .background_gradient(subset=["scout_score"], cmap="Blues"),
             use_container_width=True
         )
         
@@ -158,17 +176,17 @@ def main():
             comp_df = scored_df[scored_df["player"].isin(comp_players)]
             
             leaders = get_best_in_categories(comp_df, get_metric_categories())
-            st.markdown("### Category Leaders")
+            st.markdown("#### Category Leaders")
             cols = st.columns(len(leaders))
             for i, (cat, leader) in enumerate(leaders.items()):
-                with cols[i]: st.success(f"**{cat}**\n\n{leader}")
+                with cols[i]: st.success(f"**{cat}**\n\n{safe(leader)}")
 
             st.markdown("---")
             r_cols = st.columns(len(comp_players))
             for i, p_name in enumerate(comp_players):
                 p_row = comp_df[comp_df["player"] == p_name].iloc[0]
                 with r_cols[i]:
-                    st.markdown(f"**{p_name}**")
+                    st.markdown(f"**{safe(p_name)}**")
                     st.plotly_chart(plot_radar_chart(p_row, [f"{m}_norm" for m in valid_metrics]), use_container_width=True, key=f"comp_{p_name}")
                     st.write(generate_scouting_note(p_row, weights, get_metric_categories()))
         else:
@@ -182,7 +200,7 @@ def main():
         
         tldr = generate_tldr_summary(p_row, get_metric_categories())
         with st.container():
-            st.markdown(f"#### ⚡ TL;DR: {sel_p}")
+            st.markdown(f"#### TL;DR: {safe(sel_p)}")
             col_t1, col_t2 = st.columns(2)
             with col_t1:
                 st.markdown(f"**Profile:** {tldr['profile']}")
@@ -195,14 +213,14 @@ def main():
         c1, c2, c3 = st.columns([1, 1, 2])
         with c1:
             st.metric("Fit Score", f"{p_row['scout_score']:.1f}", help=glossary['scout_score']['definition'])
-            st.markdown(f"**Team:** {p_row['team']}\n\n**Matches:** {p_row['matches']} ({int(p_row['minutes'])} mins)")
+            st.markdown(f"**Team:** {safe(p_row['team'])}\n\n**Matches:** {p_row['matches']} ({int(p_row['minutes'])} mins)")
         with c2:
-            st.markdown(f"**Position:** {p_row['pos']}\n\n**Role:** {p_row['role_group']}")
+            st.markdown(f"**Position:** {safe(p_row['pos'])}\n\n**Role:** {safe(p_row['role_group'])}")
         with c3:
             st.plotly_chart(plot_radar_chart(p_row, [f"{m}_norm" for m in valid_metrics]), use_container_width=True, key="prof_radar")
             
         st.markdown("---")
-        st.markdown("### 📍 Pitch Activity Heatmap")
+        st.markdown("#### Pitch Activity Heatmap")
         st.caption("Visualizing event start locations (Gaussian KDE).")
         
         h1, h2 = st.columns([2, 1])
@@ -225,7 +243,7 @@ def main():
                 st.warning("No spatial data found for selected activity type.")
 
         st.markdown("---")
-        st.markdown("### Spatial Intensity (Sector Aggregate)")
+        st.markdown("#### Spatial Intensity (Sector Aggregate)")
         s1, s2, s3 = st.columns(3)
         with s1:
             st.caption("Total Actions by Third")
@@ -239,23 +257,23 @@ def main():
 
         st.markdown("---")
         report = generate_recruitment_report(p_row, get_metric_categories(), valid_metrics)
-        st.markdown(f"### Recruitment Insight: {sel_p}")
+        st.markdown(f"#### Recruitment Insight: {safe(sel_p)}")
         st.info(f"**Summary:** {report['summary']}")
         
         b1, b2 = st.columns(2)
         with b1:
             st.success("**Strengths**")
-            for s in report["strengths"]: st.write(f"✅ {s}")
+            for s in report["strengths"]: st.write(f"- {s}")
             st.markdown("**Role Fit**")
             st.write(report["role_fit"])
         with b2:
             st.warning("**Risks**")
-            for r in report["risks"]: st.write(f"⚠️ {r}")
+            for r in report["risks"]: st.write(f"- {r}")
             st.markdown("**Recommendation**")
             st.write(report["recommendation"])
             
         st.markdown("---")
-        st.markdown("### ⏳ Time Machine: Historical Trend")
+        st.markdown("#### Time Machine: Historical Trend")
         st.caption("Track performance evolution across past seasons.")
         
         if st.button(f"Load History for {sel_p}"):
@@ -278,11 +296,11 @@ def main():
                     st.warning("No historical seasons found.")
 
     with tabs[3]:
-        st.subheader("📖 Metric Guide & Methodology")
+        st.subheader("Metric Guide & Methodology")
         
         glossary = get_metric_glossary()
         cats = sorted(list(set(info["category"] for info in glossary.values())))
-        search = st.text_input("🔍 Search metrics...", placeholder="e.g. xG")
+        search = st.text_input("Search metrics...", placeholder="e.g. xG")
         
         for cat in cats:
             st.markdown(f"### {cat}")

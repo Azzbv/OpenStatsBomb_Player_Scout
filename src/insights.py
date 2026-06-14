@@ -11,22 +11,18 @@ def get_top_traits(player_row, metrics, threshold=0.75):
     return traits
 
 def generate_recruitment_report(player_row, metrics_by_cat, all_metrics):
-    """
-    Generate professional recruitment insights based on real match events.
-    """
+    """Generate recruitment insights based on match events."""
     player = player_row["player"]
     role = player_row["role_group"]
-    
-    # 1. Profile Summary (Based on top category)
+
     cat_performance = {}
     for cat, ms in metrics_by_cat.items():
         norms = [f"{m}_norm" for m in ms if f"{m}_norm" in player_row.index]
         if norms:
             cat_performance[cat] = player_row[norms].mean()
-            
+
     top_cat = max(cat_performance, key=cat_performance.get) if cat_performance else "Balanced"
-    
-    # Sector specific summary
+
     if player_row.get('final_third_ratio', 0) > 0.4:
         loc_desc = "high final-third involvement"
     elif player_row.get('actions_mid', 0) > player_row.get('actions_final', 0):
@@ -36,15 +32,13 @@ def generate_recruitment_report(player_row, metrics_by_cat, all_metrics):
 
     summary = f"Modern {role.lower()} exhibiting a {top_cat.lower()}-centric profile with {loc_desc}."
 
-    # 2. Strengths (Top 20% performance)
     strengths = []
     for m in all_metrics:
         norm_col = f"{m}_norm"
         if norm_col in player_row and player_row[norm_col] >= 0.80:
             name = m.replace("_per90", "").replace("_", " ").title()
             strengths.append(name)
-            
-    # 3. Risks (Bottom 20% performance)
+
     risks = []
     for m in all_metrics:
         norm_col = f"{m}_norm"
@@ -52,7 +46,6 @@ def generate_recruitment_report(player_row, metrics_by_cat, all_metrics):
             name = m.replace("_per90", "").replace("_", " ").title()
             risks.append(name)
 
-    # 4. Likely Role Fit (Specific tactical niches)
     role_fit = ""
     if cat_performance.get("Progression", 0) > 0.7:
         role_fit = "Primary ball progressor suited for transition-heavy systems."
@@ -63,7 +56,6 @@ def generate_recruitment_report(player_row, metrics_by_cat, all_metrics):
     else:
         role_fit = f"Reliable {role.lower()} with consistent output in {top_cat.lower()} actions."
 
-    # 5. Recommendation Note
     score = player_row["scout_score"]
     if score >= 80:
         rec = "High-priority target. Profile matches elite benchmarks for chosen tactical role."
@@ -83,32 +75,26 @@ def generate_recruitment_report(player_row, metrics_by_cat, all_metrics):
     }
 
 def generate_tldr_summary(player_row, metrics_by_cat):
-    """
-    Generate a compact, coach-friendly TL;DR summary card.
-    """
-    # 1. Profile Synthesis
+    """Generate a compact, coach-friendly TL;DR summary card."""
     role = player_row["role_group"]
     cat_scores = {}
     for cat, ms in metrics_by_cat.items():
         norms = [f"{m}_norm" for m in ms if f"{m}_norm" in player_row.index]
         if norms: cat_scores[cat] = player_row[norms].mean()
-    
+
     top_cat = max(cat_scores, key=cat_scores.get) if cat_scores else "Balanced"
     profile_note = f"{top_cat}-oriented {role.lower()} with {'high' if player_row.get('final_third_ratio', 0) > 0.35 else 'balanced'} field involvement."
 
-    # 2. Advantages (Top 15% metrics)
     adv = []
     for m in player_row.index:
         if m.endswith("_norm") and player_row[m] >= 0.85:
             adv.append(m.replace("_norm", "").replace("_per90", "").replace("_", " ").title())
-    
-    # 3. Weaknesses (Bottom 15% metrics)
+
     weak = []
     for m in player_row.index:
         if m.endswith("_norm") and player_row[m] <= 0.15:
             weak.append(m.replace("_norm", "").replace("_per90", "").replace("_", " ").title())
 
-    # 4. Tactical Fit
     fit_note = "Suited for "
     if cat_scores.get("Progression", 0) > 0.6: fit_note += "possession-heavy systems needing line-breaking actions."
     elif cat_scores.get("Defending", 0) > 0.6: fit_note += "high-intensity pressing structures."

@@ -3,6 +3,31 @@ import numpy as np
 from statsbombpy import sb
 import streamlit as st
 
+
+class SchemaError(RuntimeError):
+    """Raised when a StatsBomb payload is missing columns we depend on.
+
+    statsbombpy omits *optional* event columns when no event in a match used
+    them (handled gracefully by ``_col``), but the columns below are essential:
+    without them aggregation is meaningless. Validating in one place turns a
+    schema drift into a single clear error instead of scattered KeyErrors.
+    """
+
+
+# Minimal columns each frame must contain for aggregation to be meaningful.
+_REQUIRED_EVENT_COLS = {"type", "player_id"}
+_REQUIRED_LINEUP_COLS = {"player_id", "player_name", "positions"}
+
+
+def _require_columns(frame, required, source):
+    missing = required - set(frame.columns)
+    if missing:
+        raise SchemaError(
+            f"StatsBomb {source} payload is missing required column(s): "
+            f"{sorted(missing)}. The upstream schema may have changed."
+        )
+
+
 @st.cache_data
 def get_competitions():
     return sb.competitions()
@@ -10,6 +35,7 @@ def get_competitions():
 def _process_match_lineups(match_id, player_agg, player_events, player_id_filter=None):
     lineups = sb.lineups(match_id=match_id)
     for team, players_df in lineups.items():
+        _require_columns(players_df, _REQUIRED_LINEUP_COLS, "lineups")
         for p in players_df.to_dict('records'):
             p_id = p['player_id']
             if player_id_filter and p_id != player_id_filter:
@@ -20,7 +46,8 @@ def _process_match_lineups(match_id, player_agg, player_events, player_id_filter
                     "player": p['player_name'],
                     "team": team,
                     "minutes": 0, "matches": 0, "starts": 0, "pos_list": [],
-                    "goals": 0, "np_goals": 0, "shots": 0, "shots_on_target": 0, 
+                    "goals": 0, "np_goals": 0, "shots": 0, "shots_on_target": 0,
+                    "np_shots": 0, "np_shots_on_target": 0,
                     "xg": 0.0, "np_xg": 0.0, "assists": 0, "key_passes": 0,
                     "passes": 0, "passes_completed": 0, "passes_f3": 0, "passes_pa": 0, "prog_passes": 0,
                     "carries": 0, "prog_carries": 0, "dribbles": 0, "dispossessions": 0, "miscontrols": 0,
@@ -39,63 +66,158 @@ def _process_match_lineups(match_id, player_agg, player_events, player_id_filter
                 player_agg[p_id]["pos_list"].append(pos_entry['position'])
             player_agg[p_id]["minutes"] += mins_in_match
 
+_DEFENSIVE_KEY = {
+    'Pressure': 'pressures',
+    'Interception': 'interceptions',
+    'Ball Recovery': 'recoveries',
+    'Block': 'blocks',
+}
+
+
+def _col(events, name):
+    """Return a column as a Series, or an all-NaN Series if the column is absent.
+    statsbombpy omits columns entirely when no event in the match used them."""
+    if name in events.columns:
+        return events[name]
+    return pd.Series([np.nan] * len(events), index=events.index)
+
+
+def _list_coord(series, idx):
+    """Vectorized extraction of element `idx` from list-valued cells (e.g.
+    location -> x/y). Non-list cells (NaN) yield NaN."""
+    return series.map(lambda v: v[idx] if isinstance(v, list) else np.nan)
+
+
 def _process_match_events(match_id, player_agg, player_events, player_id_filter=None):
     events = sb.events(match_id=match_id)
-    for _, ev in events.iterrows():
-        p_id = ev.get('player_id')
-        if pd.isna(p_id) or p_id not in player_agg:
-            continue
-        if player_id_filter and p_id != player_id_filter:
-            continue
-            
-        p_stats = player_agg[p_id]
-        etype = ev['type']
-        location = ev.get('location')
-        
-        if isinstance(location, list):
-            player_events[p_id].append({'x': location[0], 'y': location[1], 'type': etype})
-        
-        sector = "Middle"
-        if isinstance(location, list):
-            x = location[0]
-            if x < 40: sector = "Def"
-            elif x > 80: sector = "Final"
-        
-        p_stats[f'actions_{sector}'] = p_stats.get(f'actions_{sector}', 0) + 1
-        
-        if etype == 'Shot':
-            p_stats['shots'] += 1
-            is_p = ev.get('shot_type') == 'Penalty'
-            xg = ev.get('shot_statsbomb_xg', 0)
-            p_stats['xg'] += xg
-            if not is_p: p_stats['np_xg'] += xg
-            if ev.get('shot_outcome') == 'Goal':
-                p_stats['goals'] += 1
-                if not is_p: p_stats['np_goals'] += 1
-            if ev.get('shot_outcome') in ['Goal', 'Saved', 'Saved to Post']:
-                p_stats['shots_on_target'] += 1
-        elif etype == 'Pass':
-            p_stats['passes'] += 1
-            if pd.isna(ev.get('pass_outcome')): p_stats['passes_completed'] += 1
-            if ev.get('pass_goal_assist'): p_stats['assists'] += 1
-            if ev.get('pass_shot_assist') or ev.get('pass_goal_assist'):
-                p_stats['key_passes'] += 1
-            if isinstance(location, list) and isinstance(ev.get('pass_end_location'), list):
-                sx, ex = location[0], ev['pass_end_location'][0]
-                if sx < 80 and ex > 80: p_stats['passes_f3'] += 1
-                if ex > 102 and 18 < ev['pass_end_location'][1] < 62 and sx < 102: p_stats['passes_pa'] += 1
-                if ex > sx + 12: p_stats['prog_passes'] += 1
-        elif etype == 'Carry':
-            p_stats['carries'] += 1
-            if isinstance(location, list) and isinstance(ev.get('carry_end_location'), list):
-                if ev['carry_end_location'][0] > location[0] + 10: p_stats['prog_carries'] += 1
-        elif etype == 'Dribble':
-            if ev.get('dribble_outcome') == 'Complete': p_stats['dribbles'] += 1
-        elif etype == 'Dispossessed': p_stats['dispossessions'] += 1
-        elif etype == 'Miscontrol': p_stats['miscontrols'] += 1
-        elif etype in ['Pressure', 'Interception', 'Ball Recovery', 'Block'] or (etype == 'Duel' and ev.get('duel_type') == 'Tackle'):
-            key = 'pressures' if etype == 'Pressure' else etype.lower().replace(' ', '_') + 's' if etype != 'Duel' else 'tackles'
-            p_stats[key] = p_stats.get(key, 0) + 1
+    if events.empty:
+        return
+    _require_columns(events, _REQUIRED_EVENT_COLS, "events")
+
+    pid = pd.to_numeric(_col(events, 'player_id'), errors='coerce')
+    tracked = set(player_agg.keys())
+    if player_id_filter is not None:
+        tracked = tracked & {player_id_filter}
+    mask = pid.notna() & pid.isin(tracked)
+    if not mask.any():
+        return
+    ev = events.loc[mask].copy()
+    ev['_pid'] = pid.loc[mask]
+
+    etype = _col(ev, 'type')
+    loc = _col(ev, 'location')
+    x = _list_coord(loc, 0)
+    has_loc = loc.map(lambda v: isinstance(v, list))
+
+    # Per-event location records for the KDE heatmap, in original order.
+    loc_rows = ev.loc[has_loc.values]
+    if not loc_rows.empty:
+        rec = pd.DataFrame({
+            '_pid': loc_rows['_pid'].values,
+            'x': _list_coord(_col(loc_rows, 'location'), 0).values,
+            'y': _list_coord(_col(loc_rows, 'location'), 1).values,
+            'type': _col(loc_rows, 'type').values,
+        })
+        for p_id, grp in rec.groupby('_pid', sort=False):
+            player_events[p_id].extend(
+                grp[['x', 'y', 'type']].to_dict('records')
+            )
+
+    sector = pd.Series('Middle', index=ev.index)
+    sector[x < 40] = 'Def'
+    sector[x > 80] = 'Final'
+    _add_counts(player_agg, ev['_pid'], sector.map(
+        {'Def': 'actions_Def', 'Middle': 'actions_Middle', 'Final': 'actions_Final'}
+    ))
+
+    is_shot = etype == 'Shot'
+    shot_type = _col(ev, 'shot_type')
+    is_pen = shot_type == 'Penalty'
+    outcome = _col(ev, 'shot_outcome')
+    # NaN xG must not poison sums; coerce to 0.0 (a missing value is no xG).
+    xg = pd.to_numeric(_col(ev, 'shot_statsbomb_xg'), errors='coerce').fillna(0.0)
+
+    _add_counts(player_agg, ev['_pid'], is_shot, 'shots')
+    _add_sums(player_agg, ev['_pid'], xg.where(is_shot, 0.0), 'xg')
+    _add_sums(player_agg, ev['_pid'], xg.where(is_shot & ~is_pen, 0.0), 'np_xg')
+    is_goal = is_shot & (outcome == 'Goal')
+    _add_counts(player_agg, ev['_pid'], is_goal, 'goals')
+    _add_counts(player_agg, ev['_pid'], is_goal & ~is_pen, 'np_goals')
+    _add_counts(player_agg, ev['_pid'],
+                is_shot & outcome.isin(['Goal', 'Saved', 'Saved to Post']),
+                'shots_on_target')
+    # Non-penalty shot volume keeps shot metrics consistent with np_xg.
+    _add_counts(player_agg, ev['_pid'], is_shot & ~is_pen, 'np_shots')
+    _add_counts(player_agg, ev['_pid'],
+                is_shot & ~is_pen & outcome.isin(['Goal', 'Saved', 'Saved to Post']),
+                'np_shots_on_target')
+
+    is_pass = etype == 'Pass'
+    pass_outcome = _col(ev, 'pass_outcome')
+    completed = is_pass & pass_outcome.isna()  # completed passes have a NaN outcome
+    # Compare with `== True`, not plain truthiness: bool(NaN) is True, which would
+    # count every NaN-flagged pass as an assist/key pass.
+    goal_assist = _col(ev, 'pass_goal_assist') == True  # noqa: E712
+    shot_assist = _col(ev, 'pass_shot_assist') == True  # noqa: E712
+    _add_counts(player_agg, ev['_pid'], is_pass, 'passes')
+    _add_counts(player_agg, ev['_pid'], completed, 'passes_completed')
+    _add_counts(player_agg, ev['_pid'], is_pass & goal_assist, 'assists')
+    _add_counts(player_agg, ev['_pid'], is_pass & (shot_assist | goal_assist), 'key_passes')
+
+    pass_end = _col(ev, 'pass_end_location')
+    has_pass_end = pass_end.map(lambda v: isinstance(v, list))
+    ex = _list_coord(pass_end, 0)
+    ey = _list_coord(pass_end, 1)
+    pass_geo = is_pass & has_loc & has_pass_end
+    _add_counts(player_agg, ev['_pid'], pass_geo & (x < 80) & (ex > 80), 'passes_f3')
+    _add_counts(player_agg, ev['_pid'],
+                pass_geo & (ex > 102) & (ey > 18) & (ey < 62) & (x < 102), 'passes_pa')
+    _add_counts(player_agg, ev['_pid'], pass_geo & (ex > x + 12), 'prog_passes')
+
+    is_carry = etype == 'Carry'
+    carry_end = _col(ev, 'carry_end_location')
+    has_carry_end = carry_end.map(lambda v: isinstance(v, list))
+    cex = _list_coord(carry_end, 0)
+    _add_counts(player_agg, ev['_pid'], is_carry, 'carries')
+    _add_counts(player_agg, ev['_pid'],
+                is_carry & has_loc & has_carry_end & (cex > x + 10), 'prog_carries')
+
+    _add_counts(player_agg, ev['_pid'],
+                (etype == 'Dribble') & (_col(ev, 'dribble_outcome') == 'Complete'),
+                'dribbles')
+    _add_counts(player_agg, ev['_pid'], etype == 'Dispossessed', 'dispossessions')
+    _add_counts(player_agg, ev['_pid'], etype == 'Miscontrol', 'miscontrols')
+
+    for sb_type, out_key in _DEFENSIVE_KEY.items():
+        _add_counts(player_agg, ev['_pid'], etype == sb_type, out_key)
+    is_tackle = (etype == 'Duel') & (_col(ev, 'duel_type') == 'Tackle')
+    _add_counts(player_agg, ev['_pid'], is_tackle, 'tackles')
+
+
+def _add_counts(player_agg, pids, mask_or_keys, key=None):
+    """Increment `key` by the per-player count of True rows in `mask_or_keys`,
+    or, when `key` is None, treat `mask_or_keys` as a Series of target keys
+    (one per row) and increment each."""
+    if key is None:
+        keys = mask_or_keys
+        for p_id, grp in keys.groupby(pids, sort=False):
+            for out_key, n in grp.value_counts().items():
+                player_agg[p_id][out_key] = player_agg[p_id].get(out_key, 0) + int(n)
+        return
+    mask = mask_or_keys.fillna(False).astype(bool)
+    if not mask.any():
+        return
+    counts = pids[mask.values].value_counts()
+    for p_id, n in counts.items():
+        player_agg[p_id][key] = player_agg[p_id].get(key, 0) + int(n)
+
+
+def _add_sums(player_agg, pids, values, key):
+    """Add the per-player sum of `values` into `key`."""
+    sums = values.groupby(pids, sort=False).sum()
+    for p_id, total in sums.items():
+        if total:
+            player_agg[p_id][key] = player_agg[p_id].get(key, 0.0) + float(total)
 
 def _compile_player_dataframe(player_agg):
     rows = []
@@ -109,6 +231,7 @@ def _compile_player_dataframe(player_agg):
             "player_id": p_id, "player": s["player"], "team": s["team"], "pos": pos,
             "minutes": s["minutes"], "matches": s["matches"], "starts": s["starts"],
             "goals": s["goals"], "np_goals": s["np_goals"], "shots": s["shots"], "shots_on_target": s["shots_on_target"],
+            "np_shots": s.get("np_shots", 0), "np_shots_on_target": s.get("np_shots_on_target", 0),
             "xg": s["xg"], "np_xg": s["np_xg"], "assists": s["assists"], "key_passes": s["key_passes"],
             "passes": s["passes"], "passes_completed": s["passes_completed"],
             "passes_f3": s["passes_f3"], "passes_pa": s["passes_pa"],
@@ -118,7 +241,8 @@ def _compile_player_dataframe(player_agg):
             "recoveries": s["recoveries"], "blocks": s["blocks"],
             "actions_def": s.get("actions_Def", 0), "actions_mid": s.get("actions_Middle", 0), "actions_final": s.get("actions_Final", 0),
             "final_third_ratio": s.get("actions_Final", 0) / max(1, (s.get("actions_Def", 0) + s.get("actions_Middle", 0) + s.get("actions_Final", 0))),
-            "age": None, "market_value": None, "league": "StatsBomb", "season": "Open", "foot": "Unknown"
+            # age / market value / preferred foot are not in StatsBomb Open Data
+            # and are intentionally omitted; do not re-add them as placeholders.
         })
     return pd.DataFrame(rows)
 
